@@ -1,2 +1,3 @@
 # coursework_timeseries_house_price
-UK house prices, the SP 500 index and Brent oil prices
+The project investigates the association between the SP 500 index, Brent oil prices and UK local authority level house prices. 
+Methods used are Granger causality test, transfer entropy and time series decomposition.
