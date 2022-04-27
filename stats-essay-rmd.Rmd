@@ -1,0 +1,612 @@
+---
+title: "essay"
+author: "mira"
+date: "2022/4/22"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## background
+UK imports and exports oil and gas
+oil
+https://www.worldometers.info/oil/uk-oil/
+gas
+https://www.gov.uk/government/statistics/gas-section-4-energy-trends
+https://www.worldometers.info/gas/uk-natural-gas/
+
+## data sources
+
+House price:
+UK data.gov HPI full file 2004 Janurary - 2022 Jan
+https://www.gov.uk/government/statistical-data-sets/uk-house-price-index-data-downloads-january-2022
+
+House supply:
+Table122 housing supply, net additional dwellings by LA, 2001-2021
+https://www.gov.uk/government/statistical-data-sets/live-tables-on-net-supply-of-housing
+
+Oil price, Europe Brent Spot price (dollar per barrel), 1987 May- 2022 Mar, selected 2004 Jan-2022 Jan
+US Energy Information Administration
+https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=RBRTE&f=M
+
+stock price, Financial times:
+UKFTSE100 historical prices, SP500 historical prices.
+https://www.wsj.com/market-data/quotes/index/SPX/historical-prices
+https://www.wsj.com/market-data/quotes/index/UK/FTSE%20UK/UKX/historical-prices
+
+local authorities, employment by industry:
+ONS nomis official labour market statistics (API reference IDBRLU)
+https://www.nomisweb.co.uk/datasets/idbrlu
+2007 standard industry classification: 06.1 extraction of crude petroleum, 06.2: extraction of natural gas
+employment size bands: micro 0-4, 5-9; small, 10-19, 20-49; medium, 50-99, 100-249; large, 250-499, 500-999, 1000+
+micro/ small employment in: 
+Stockton-on-Tees E06000004, 
+Nolfolk, 
+City of London, E09000001,(E13000001 inner London, E13000002 outer London, London E12000007)
+Westminster, E09000033 (city of?)
+Hampshire, E07000085
+Surrey, E10000030
+Aberdeen city, 
+Aberdeenshire, S12000034 
+Guildford, E07000209
+
+ONS population projection, population growth 2012:
+https://www.ons.gov.uk/peoplepopulationandcommunity/populationandmigration/populationprojections/bulletins/subnationalpopulationprojectionsforengland/2014-05-29
+
+local authorities, population profile:
+2011 classification of workplace zones (industry)
+https://www.ons.gov.uk/methodology/geography/geographicalproducts/areaclassifications/2011workplacebasedareaclassification/classificationofworkplacezonesfortheukdatasets
+2011 classification of residential areas
+https://www.ons.gov.uk/methodology/geography/geographicalproducts/areaclassifications/2011areaclassifications/datasets
+mapping of workplace zones to MSOA and LA, ONS
+https://geoportal.statistics.gov.uk/datasets/ons::workplace-zones-to-middle-layer-super-output-area-to-local-authority-district-december-2020-lookup-in-england-and-wales/explore
+or
+https://data.gov.uk/dataset/61fc9c81-03c7-4c3d-a952-6c450eb6f50c/workplace-zone-to-middle-layer-super-output-area-to-local-authority-district-december-2011-lookup-in-england-and-wales
+
+
+map of local authorities, data.gov.uk:
+https://data.gov.uk/dataset/43a9fad5-203d-4fe7-8741-ae04dbc80344/local-authority-districts-december-2019-boundaries-uk-bfc
+
+```{r}
+library(dplyr)
+library(corrplot)
+library(corrgram)
+library(readxl)
+library(readr)
+library(tidyverse)
+library(viridis)
+library(RColorBrewer)
+library(data.table)
+library(ggplot2)
+library(cdlTools)
+library(stargazer)
+library(sf)
+library(tmap)
+library(lmtest)
+library(RTransferEntropy)
+library(Rlibeemd)
+```
+
+## import data
+```{r}
+# local authorities HPI 2004-2022(on average and by house type)
+HPI_series <- read_csv("HPI_series.csv")
+areas <- unique(HPI_series$AreaCode) # 421 local authorities
+# Brent historical spot oil price (dollar per barrel) 2004-2022
+brent_series <- read_excel("brent_series.xlsx") # 217 obs
+# SP 500 historical price 2004-2019
+SP<-read_csv("SP500.csv")
+# UKFTSE100 historical price 2004-2019
+UKFT<-read_csv("UKFTSE100.csv")
+```
+
+## explore data
+```{r}
+# examine Aberdeen, main UK oil industry hub
+Aberdeen.series <- filter(HPI_series,AreaCode=="S12000034")
+# select the indices for the four types: detached, semi-detached, terraced, flats
+Aberdeen.series <- Aberdeen.series[,c(1:3,10,14,18,22)] 
+Aberdeen.series$brentprice <-brent_series$brentprice
+Aberdeen.series$ID <- 1:217
+Aberdeen.series.l <- Aberdeen.series %>% pivot_longer(cols=4:7,names_to="type",values_to = "price")
+
+# plot the HPI for the four house types, they follow similar trends
+# and against the oil price trends
+ggplot(Aberdeen.series.l, aes(x=ID,y=price,group=type,color=type))+ 
+  geom_line()+
+  labs(x="Date (months starting Jan 2004)",y="Aberdeen House Price Index")+
+  scale_colour_brewer(palette="RdBu")+
+  geom_line(aes(x=ID,y=brentprice*0.5),color="green")+
+  scale_y_continuous(name="Aberdeen House price index",sec.axis=sec_axis(~.*2,name="Brent oil price"))+
+  theme_minimal()+
+  ylim(0,175)
+# there is a period of synced rise in oil and house prices prior to the 2008 financial crisis
+# also around Jan 2009- Sep 2010: this is recovery from the crisis 
+# and Apr 2020- now: this is after the first wave of COVID which drove down demand for oil and drove up demand for suburb houses.(during this period flat prices clearly lags behind detached house prices)
+```
+
+```{r}
+# examine London (westminster)
+westminster.series <- filter(HPI_series,AreaCode=="E09000033")
+
+westminster.series <- westminster.series[,c(1:3,10,14,18,22)] 
+westminster.series <- westminster.series[c(109:325),] # take the latest 217 obs
+westminster.series$brentprice <-brent_series$brentprice
+westminster.series$ID <- 1:217
+westminster.series.l <- westminster.series %>% pivot_longer(cols=4:7,names_to="type",values_to = "price")
+
+# plot the HPI against the oil price trends
+ggplot(westminster.series.l, aes(x=ID,y=price,group=type,color=type))+ 
+  geom_line()+
+  labs(x="Date (months starting Jan 2004)",y="Westminster House Price")+
+  scale_colour_brewer(palette="RdBu")+
+  geom_line(aes(x=ID,y=brentprice*0.5),color="green")+
+  scale_y_continuous(name="Westminster House price index",sec.axis=sec_axis(~.*2,name="Brent oil price"))+
+  theme_minimal()+
+  ylim(0,175)
+```
+
+
+```{r}
+# calculate LA level average HPI growth during the three waves of house price inflation.
+
+HPI_series2.w <- HPI_series2 %>% pivot_wider(names_from=Date,values_from = Index)
+# average monthly growth during the first boom prior to 2008 crisis
+HPI_series2.w$grow1 <- (HPI_series2.w$`01/01/2008`-HPI_series2.w$`01/01/2006`)/24
+# average monthly growth during the recovery of crisis
+HPI_series2.w$grow2 <- (HPI_series2.w$`01/09/2010`-HPI_series2.w$`01/01/2009`)/21
+# average monthly growth during the latest pandemic boom
+HPI_series2.w$grow3 <- (HPI_series2.w$`01/01/2022`-HPI_series2.w$`01/04/2020`)/21
+
+HPI_series2.w <- HPI_series2.w[,c(1,648:650)]
+
+hist(HPI_series2.w $grow1) # heavily positively skewed, 
+hist(log(HPI_series2.w $grow1+1)) # ok
+hist(HPI_series2.w $grow2) # slightly negatively skewed, 
+HPI_series2.w$grow22 <- ifelse(HPI_series2.w$grow2>-0.3,HPI_series2.w$grow2,-0.3)
+hist(HPI_series2.w $grow22) # ok
+hist(HPI_series2.w $grow3) # ok
+
+# examine the distribution of the three growth measurements
+par(mfrow=c(2,3))
+hist(log(HPI_series2.w $grow1),xlab="Log Price growth 1",main="") 
+hist(HPI_series2.w $grow22,xlab="Price growth 2",main="") 
+hist(HPI_series2.w $grow3,xlab="Price growth 3",main="") 
+qqnorm(log(HPI_series2.w $grow1),xlab="Price growth 1",main="")
+qqline(log(HPI_series2.w $grow1),col="blue")
+qqnorm(HPI_series2.w $grow22,xlab="Price growth 2",main="")
+qqline(HPI_series2.w $grow22,col="blue")
+qqnorm(HPI_series2.w $grow3,xlab="Price growth 3",main="")
+qqline(HPI_series2.w $grow3,col="blue")
+```
+
+## analyses
+```{r}
+# map the house price growth across LAs
+map <- st_read('Local_Authority_Districts_(December_2019)_Boundaries_UK_BUC.shp')
+class(map) # sf
+head(map) # LA ID in lad19cd, 382 obs
+map <- left_join(map,HPI_series2.w,by=c("lad19cd"="AreaCode"))
+
+tm_shape(map)+
+  tm_fill(col=c("grow1","grow22","grow3"),palette="RdBu",style = "quantile", n = 9)+
+  tm_borders(col='black',lwd=0.1)+
+  tm_scale_bar()+
+  tm_layout(legend.show = FALSE)
+
+tm_shape(map)+
+  tm_fill(col="grow3",palette="RdBu",style = "quantile", n = 9)+
+  tm_borders(col='black',lwd=0.1)+
+  tm_scale_bar()+
+  tm_layout(legend.outside = TRUE)
+```
+
+```{r}
+# add measurements of oil industry concentration, based on ONS labour statistics
+oil_prod <- c("E09000001","E09000033","E07000085","E10000030","S12000034","E07000209")
+oilgas_prod <- c("E09000001","E09000033","E07000085","E10000030","S12000034","E07000209","E08000022","E07000127","E07000147","E07000146","E06000011","E08000021")
+
+map$oilgas_prod <- ifelse(map$lad19cd%in%oilgas_prod,1,0) 
+HPI_series2.w$oilgas_prod<- ifelse(HPI_series2.w$AreaCode%in%oilgas_prod,1,0) 
+
+tm_shape(map)+
+  tm_fill(col="oilgas_prod",n=2)+
+  tm_borders(col='black',lwd=0.1)+
+  tm_scale_bar()+
+  tm_layout(legend.outside = TRUE)
+```
+
+
+```{r}
+# calculate each LA's distance to nearest oil_gas production hubs
+# create distance matrix between all LA pairs
+centroids <- st_point_on_surface(x=map)
+distance_matrix <- st_distance(centroids,centroids) # 382 * 382
+# get ID of oil_gas hubs and select columns in distance matrix with such ID
+ID <- centroids[which(centroids$lad19cd%in%oilgas_prod),]
+ID <- c(11,112,150,169,170,215,268,25,317,348)
+dist <- as.data.frame(distance_matrix[,ID]) #382*10
+# get every LA's distance to the nearest hub
+min_dist<- NULL
+for (i in 1:382) {
+  min_dist[i] <- min(dist[i,])
+}
+min_dist<- as.data.frame(min_dist)
+min_dist$AreaCode<-centroids$lad19cd
+HPI_series2.w <- left_join(HPI_series2.w,min_dist)
+hist(log(HPI_series2.w$min_dist)) # looks fine
+```
+
+
+```{r}
+# add control variables:
+# residential classification and local characteristics, all UK
+# classification by residential and work area groupings (2011 census based)
+# 8 classifications: affluent England, Business education and heritage centers, countryside living, ethnically diverse metropolitan living, London cosmopolitan, service and industrial legacy, town and country living, urban settlements.
+res_clas <- read_excel("2011demo_resi_clas.xls")
+HPI_series2.w <- left_join(HPI_series2.w,res_clas,by=c("AreaCode"="Code"))
+```
+
+
+```{r}
+# add control variables: demand and supply side proxies
+# demand: population growth and migration
+pop <- read_excel("ons_pop_projection2012.xls")
+pop <- filter(pop,COMPONENT=="All Migration Net") # or "Natural Change"
+HPI_series2.w <- left_join(HPI_series2.w,pop[,c(1,5)],by=c("AreaCode"="CODE"))
+hist(log(HPI_series2.w$`2013.y`)) # net migration
+hist(HPI_series2.w$`2013.x`) # population growth
+
+# supply side: new dwellings in 2006, 2010, 2020
+supply <- read_excel("Table_122.xlsx")
+HPI_series2.w <- left_join(HPI_series2.w,supply[,c(1,3:5)],by=c("AreaCode"="CODE"))
+HPI_series2.w$supply2 <- ifelse(HPI_series2.w$supply2>0,HPI_series2.w$supply2,0)
+HPI_series2.w$supply1 <- ifelse(HPI_series2.w$supply1>0,HPI_series2.w$supply1,0)
+
+hist(HPI_series2.w$supply3)
+hist(HPI_series2.w$supply2)
+hist(HPI_series2.w$supply1)
+hist(log(HPI_series2.w$supply1)) 
+hist(log(HPI_series2.w$supply2))
+hist(log(HPI_series2.w$supply3))
+
+```
+
+
+```{r}
+# cross-sectional regression
+# modeling liquidity shock by international oil price movement
+# HPI growth explained by oil_gas hubs, distance to oil_gas hubs, supply, demand
+
+m1 <- glm(log(grow1+1)~as.factor(oilgas_prod)+log(`2013.x`+10)+log(supply1+1),data=HPI_series2.w)
+m2 <- glm(grow22~as.factor(oilgas_prod)+log(`2013.x`+10)+log(supply2+1),data=HPI_series2.w)
+m3 <- glm(grow3~as.factor(oilgas_prod)+log(`2013.x`+10)+log(supply3+1),data=HPI_series2.w)
+
+m11 <- glm(log(grow1+1)~as.factor(oil_prod)+log(`2013.x`+10)+log(supply1+1),data=HPI_series2.w)
+m22 <- glm(grow22~as.factor(oil_prod)+log(`2013.x`+10)+log(supply2+1),data=HPI_series2.w)
+m33 <- glm(grow3~as.factor(oil_prod)+log(`2013.x`+10)+log(supply3+1),data=HPI_series2.w)
+
+m11 <- glm(log(grow1+1)~as.factor(oil_prod)+log(min_dist+1)+log(`2013.x`+10)+log(supply1+1),data=HPI_series2.w)
+m22 <- glm(grow22~as.factor(oil_prod)+log(min_dist+1)+log(`2013.x`+10)+log(supply2+1),data=HPI_series2.w)
+m33 <- glm(grow3~as.factor(oil_prod)+log(min_dist+1)+log(`2013.x`+10)+log(supply3+1),data=HPI_series2.w)
+
+m111 <- glm(log(grow1+1)~log(min_dist+1)+log(`2013.x`+10)+log(supply1+1),data=HPI_series2.w)
+m222 <- glm(grow22~log(min_dist+1)+log(`2013.x`+10)+log(supply2+1),data=HPI_series2.w)
+m333 <- glm(grow3~log(min_dist+1)+log(`2013.x`+10)+log(supply3+1),data=HPI_series2.w)
+#summary(m1)
+stargazer(m1,m2,m3,m11,m22,m33,type="text")
+
+```
+
+
+## modeling liquidity shock by international stock market movement
+```{r}
+# LA level HPI
+HPI_series3.w <- HPI_series2 %>% pivot_wider(names_from=Date,values_from = Index)
+HPI_series3.w <- HPI_series3.w[,c(1:193)] # select 2004-19 (16 years) time series
+HPI_series3.w <- HPI_series3.w[complete.cases(HPI_series3.w),] # drop NA rows, 410 obs
+HPI_series3.l <- HPI_series3.w%>% pivot_longer(!AreaCode,names_to = "Date",values_to = "price")
+HPI_series4.w <- HPI_series3.l%>%pivot_wider(names_from = "AreaCode",values_from = "price")
+HPI_series4.w$SP <- rev(SP$Close)
+HPI_series4.w$FT <- rev(UKFT$Close)
+
+# visualise examples
+# Aberdeen
+Aberdeen.series2<-Aberdeen.series[1:192,]
+Aberdeen.series2$SP <- rev(SP$Close)
+hist(SP$Close)
+
+ggplot(Aberdeen.series2, aes(x=ID,y=FlatIndex))+ 
+  geom_line(color="red")+
+  labs(x="Date (months starting Jan 2004)",y="Aberdeen House Price Index")+
+  scale_colour_brewer(palette="RdBu")+
+  geom_line(aes(x=ID,y=SP*0.01),color="green")+
+  scale_y_continuous(name="Aberdeen House price index",sec.axis=sec_axis(~.*100,name="SP 500 price"))+
+  theme_minimal()
+# London
+London.series <- filter(HPI_series,AreaCode=="E09000001")
+London.series <- London.series[1:192,c(1:3,10,14,18,22)]
+London.series$ID <- 1:192
+London.series$SP <- rev(SP$Close)
+ggplot(London.series, aes(x=ID,y=FlatIndex))+ 
+  geom_line(color="red")+
+  labs(x="Date (months starting Jan 2004)",y="London House Price Index")+
+  scale_colour_brewer(palette="RdBu")+
+  geom_line(aes(x=ID,y=SP*0.01),color="green")+
+  scale_y_continuous(name="London House price index",sec.axis=sec_axis(~.*100,name="SP 500 price"))+
+  theme_minimal()
+# from the charts we can see that London tracts the SP500 more closely than Aberdeen
+```
+
+```{r}
+# predict HPI with SP500 movement 
+# example with London, Bristol, Aberdeen
+grangertest(E09000001~SP,order=2,data=HPI_series4.w) # p 0.22
+grangertest(E06000023~SP,order=2,data=HPI_series4.w) # 0.002
+grangertest(S12000034~SP,order=2,data=HPI_series4.w) # 0.57
+
+# Granger test for all LA
+for (i in 2:411){
+  x <- HPI_series4.w[,c(i,412)]
+  colnames(x)<-c("LA","SP")
+  t <- grangertest(SP~LA,order=1,data=x)
+  test[i] <- t[2,4]
+}
+test <-test[2:411]
+HPI_series3.w$Granger_P_value <- as.vector(test) # in col 194
+
+# map the p value for Granger test
+map <- left_join(map,HPI_series3.w[,c(1,195)],by=c("lad19cd"="AreaCode"))
+
+tm_shape(map)+
+  tm_fill(col="Granger_P_value",palette="-RdBu",style="jenks",n=5,midpoint = 0.1)+
+  tm_borders(col='black',lwd=0.05)+
+  tm_scale_bar()+
+  tm_layout(legend.outside = TRUE)
+# when predicting HPI with SP500, map shows low significance around London and in a few Scotland LAs.
+# when the direction of prediction reverses, the geographic pattern also reverse. London area HPI is predictive of SP500 in short term.
+```
+
+
+```{r}
+# repeat with UKFTSE100 (col 413) domestic stock market movement
+# map <- map[,-c(24:35)]
+test<-NULL
+for (i in 2:411){
+  x <- HPI_series4.w[,c(i,413)]
+  colnames(x)<-c("LA","FT")
+  t <- grangertest(LA~FT,order=2,data=x)
+  test[i] <- t[2,4]
+}
+test <-test[2:411]
+HPI_series3.w$Granger_P_value <- as.vector(test) # in col 195
+
+# map the p value for Granger test
+map <- left_join(map,HPI_series3.w[,c(1,196)],by=c("lad19cd"="AreaCode"))
+
+tm_shape(map)+
+  tm_fill(col="Granger_P_value2",palette="-RdBu",style="jenks",n=5,midpoint = 0.1)+
+  tm_borders(col='black',lwd=0.05)+
+  tm_scale_bar()+
+  tm_layout(legend.outside = TRUE)
+# results looks similar to SP 500. why?
+```
+
+```{r}
+# repeat for oil price
+HPI_series4.w$brent <- brent_series$brentprice[1:192]
+# map <- map[,-c(24:29)]
+test<-NULL
+for (i in 2:411){
+  x <- HPI_series4.w[,c(i,415)]
+  colnames(x)<-c("LA","Oil")
+  t <- grangertest(Oil~LA,order=2,data=x)
+  test[i] <- t[2,4]
+}
+test <-test[2:411]
+HPI_series3.w$Granger_P_value <- as.vector(test) # in col 195
+
+# map the p value for Granger test
+map <- left_join(map,HPI_series3.w[,c(1,195)],by=c("lad19cd"="AreaCode"))
+
+tm_shape(map)+
+  tm_fill(col="Granger_P_value",palette="-RdBu",style="jenks",n=5,midpoint = 0.1)+
+  tm_borders(col='black',lwd=0.05)+
+  tm_scale_bar()+
+  tm_layout(legend.outside = TRUE)
+# results confirm that HPI is not informative of oil price
+# oil price predicts HPI in most LA. This can also be obtained with panel regression 
+```
+
+## using transfer entropy, which quantifies correlation
+```{r}
+# transfer entropy for SP500 and all LA HPI
+# this takes 20 min to run
+TE1<-NULL
+pval<-NULL
+TE2<-NULL
+pval2<-NULL
+for (i in 2:411){
+  x <- HPI_series4.w[,c(i,412)] # x:HPI y:SP500
+  t <- transfer_entropy(x[,1],x[,2],
+                 lx=1,ly=1,q=0.1,entropy='Shannon',shuffles=100,
+                 type='quantiles',quantiles=c(5,95),nboot=300,burn=50)
+  TE1[i] <- t$coef[2,1] # the Y to X transfer entropy
+  pval[i] <- t$coef[2,4] # the p value
+  TE2[i] <- t$coef[1,1] # the X to Y transfer entropy
+  pval2[i] <- t$coef[1,4] # the p value
+}
+
+# store output
+TE1 <-TE1[-1]
+pval <-pval[-1]
+TE2 <-TE2[-1]
+pval2 <-pval2[-1]
+HPITE<-data.frame(HPI_series3.w[,1],TE1,pval,TE2,pval2)
+
+# filter out significant TE, set threshold as pval 0.1
+HPITE$signif.TE <- ifelse(HPITE$pval2<0.1,HPITE$TE2,NA)
+HPITE$sig.TE <- ifelse(HPITE$pval<0.1,HPITE$TE1,NA)
+
+# map the significant TE
+map <- left_join(map,HPITE,by=c("lad19cd"="AreaCode"))
+
+tm_shape(map)+
+  tm_fill(col="pval2",palette="-RdBu",n=5,style="quantile",midpoint=0.1)+
+  tm_borders(col='black',lwd=0.05)+
+  tm_scale_bar()+
+  tm_layout(legend.outside = TRUE)
+```
+## empirical mode decomposition 
+decompose time series into IMFs of short/ long term dynamics and a residual trend. use the decomposed components to run the transfer entropy analysis.
+
+```{r}
+# empirical mode decomposition
+# example with London HPI and SP 500
+xt<-HPI_series4.w$SP
+IMF <- emd(xt,num_imf=3)
+plot(IMF) # IMF1 around 2-3 month cycle, IMF2 around 6-7 month
+
+# for all LAs
+# Rlibeemd package emd input needs to be vector
+HPI.matrix<-as.matrix(HPI_series4.w[,2:412])
+IMF <-NULL
+for (i in 1:411){
+  xt<-HPI.matrix[,i]
+  IMF[[i]]<-emd(xt,num_imf=3)
+}
+
+# group the IMF1 short term dynamic
+IMF1 <-NULL
+for (i in 1:411){ IMF1[[i]]<-IMF[[i]][,1] }
+IMF1 <- as.data.frame(IMF1)
+colnames(IMF1)<-c(HPI_series3.w$AreaCode,"SP")
+
+# group the IMF2 mid term dynamic
+IMF2 <-NULL
+for (i in 1:411){ IMF2[[i]]<-IMF[[i]][,2] }
+IMF2 <- as.data.frame(IMF2)
+colnames(IMF2)<-c(HPI_series3.w$AreaCode,"SP")
+
+# group the residual trends
+IMF3 <-NULL
+for (i in 1:411){ IMF3[[i]]<-IMF[[i]][,3] }
+IMF3 <- as.data.frame(IMF3)
+colnames(IMF3)<-c(HPI_series3.w$AreaCode,"SP")
+
+```
+
+
+```{r}
+# repeat transfer entropy estimation with decomposed time series
+# short term
+IMF1.TE1<-NULL
+IMF1.pval<-NULL
+IMF1.TE2<-NULL
+IMF1.pval2<-NULL
+for (i in 1:410){
+  x <- IMF1[,c(i,411)] # x:HPI y:SP500
+  t <- transfer_entropy(x[,1],x[,2],
+                 lx=1,ly=1,q=0.1,entropy='Shannon',shuffles=100,
+                 type='quantiles',quantiles=c(5,95),nboot=300,burn=50)
+  IMF1.TE1[i] <- t$coef[2,1] # the Y to X transfer entropy
+  IMF1.pval[i] <- t$coef[2,4] # the p value
+  IMF1.TE2[i] <- t$coef[1,1] # the X to Y transfer entropy
+  IMF1.pval2[i] <- t$coef[1,4] # the p value
+}
+
+# store output
+IMF1.TE<-data.frame(HPI_series3.w[,1],IMF1.TE1,IMF1.pval,IMF1.TE2,IMF1.pval2)
+
+# filter out significant TE, set threshold as pval 0.1
+IMF1.TE$IMF1.signif.TE <- ifelse(IMF1.TE$IMF1.pval2<0.1,IMF1.TE$IMF1.TE2,NA)
+IMF1.TE$IMF1.sig.TE <- ifelse(IMF1.TE$IMF1.pval<0.1,IMF1.TE$IMF1.TE1,NA)
+
+# map the significant TE
+map <- left_join(map,IMF1.TE,by=c("lad19cd"="AreaCode"))
+
+tm_shape(map)+
+  tm_fill(col="IMF1.signif.TE",colorNA="grey39",palette="BuPu",n=5,style="quantile",midpoint=NA)+
+  tm_borders(col='black',lwd=0.01)+
+  tm_scale_bar()+
+  tm_layout(legend.outside = TRUE)
+
+# on short term fluctuations in both directions, London areas are significant
+```
+
+```{r}
+# repeat transfer entropy estimation with decomposed time series
+# mid term
+IMF2.TE1<-NULL
+IMF2.pval<-NULL
+IMF2.TE2<-NULL
+IMF2.pval2<-NULL
+for (i in 1:410){
+  x <- IMF2[,c(i,411)] # x:HPI y:SP500
+  t <- transfer_entropy(x[,1],x[,2],
+                 lx=1,ly=1,q=0.1,entropy='Shannon',shuffles=100,
+                 type='quantiles',quantiles=c(5,95),nboot=300,burn=50)
+  IMF2.TE1[i] <- t$coef[2,1] # the Y to X transfer entropy
+  IMF2.pval[i] <- t$coef[2,4] # the p value
+  IMF2.TE2[i] <- t$coef[1,1] # the X to Y transfer entropy
+  IMF2.pval2[i] <- t$coef[1,4] # the p value
+}
+
+# store output
+IMF2.TE<-data.frame(HPI_series3.w[,1],IMF2.TE1,IMF2.pval,IMF2.TE2,IMF2.pval2)
+
+# filter out significant TE, set threshold as pval 0.1
+IMF2.TE$IMF2.signif.TE <- ifelse(IMF2.TE$IMF2.pval2<0.1,IMF2.TE$IMF2.TE2,NA)
+IMF2.TE$IMF2.sig.TE <- ifelse(IMF2.TE$IMF2.pval<0.1,IMF2.TE$IMF2.TE1,NA)
+
+# map the significant TE
+map <- left_join(map,IMF2.TE,by=c("lad19cd"="AreaCode"))
+
+tm_shape(map)+
+  tm_fill(col="IMF2.signif.TE",colorNA="grey39",palette="BuPu",n=5,style="quantile",midpoint=NA)+
+  tm_borders(col='black',lwd=0.05)+
+  tm_scale_bar()+
+  tm_layout(legend.outside = TRUE)
+# significant pairs dropped to only a few. No clear pattern
+```
+
+
+```{r}
+# repeat transfer entropy estimation with decomposed time series
+# trend
+trend.TE1<-NULL
+trend.pval<-NULL
+trend.TE2<-NULL
+trend.pval2<-NULL
+for (i in 1:410){
+  x <- IMF3[,c(i,411)] # x:HPI y:SP500
+  t <- transfer_entropy(x[,1],x[,2],
+                 lx=1,ly=1,q=0.1,entropy='Shannon',shuffles=100,
+                 type='quantiles',quantiles=c(5,95),nboot=300,burn=50)
+  trend.TE1[i] <- t$coef[2,1] # the Y to X transfer entropy
+  trend.pval[i] <- t$coef[2,4] # the p value
+  trend.TE2[i] <- t$coef[1,1] # the X to Y transfer entropy
+  trend.pval2[i] <- t$coef[1,4] # the p value
+}
+
+# store output
+trend.TE<-data.frame(HPI_series3.w[,1],trend.TE1,trend.pval,trend.TE2,trend.pval2)
+
+# filter out significant TE, set threshold as pval 0.1
+trend.TE$trend.signif.TE <- ifelse(trend.TE$trend.pval2<0.1,trend.TE$trend.TE2,NA)
+trend.TE$trend.sig.TE <- ifelse(trend.TE$trend.pval<0.1,trend.TE$trend.TE1,NA)
+
+# map the significant TE
+map <- left_join(map,trend.TE,by=c("lad19cd"="AreaCode"))
+
+tm_shape(map)+
+  tm_fill(col="trend.signif.TE",colorNA="grey39",palette="BuPu",n=5,style="quantile",midpoint=NA)+
+  tm_borders(col='black',lwd=0.05)+
+  tm_scale_bar()+
+  tm_layout(legend.outside = TRUE)
+
+```
+
+
