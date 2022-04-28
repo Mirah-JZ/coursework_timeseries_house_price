@@ -86,6 +86,7 @@ library(sf)
 library(tmap)
 library(lmtest)
 library(RTransferEntropy)
+library(biwavelet)
 library(Rlibeemd)
 ```
 
@@ -609,4 +610,36 @@ tm_shape(map)+
 
 ```
 
+```{r}
 
+# define two vector variables with time stamps
+t1 <-as.matrix(cbind(1:192,HPI_series4.w[,412]))# SP
+t2 <-as.matrix(cbind(1:192,HPI_series4.w[,415]))# Brent
+t3 <-as.matrix(cbind(1:192,HPI_series4.w[,76])) # London series
+t4 <-as.matrix(cbind(1:192,HPI_series4.w[,2])) # Aberdeen series
+
+# compute and plot wavelet coherence
+wtc.13<-wtc(t1,t3,nrands=20)
+wtc.23<-wtc(t2,t3,nrands=20)
+wtc.14<-wtc(t1,t4,nrands=20)
+wtc.24<-wtc(t2,t4,nrands=20)
+
+plot(wtc.13, plot.phase=TRUE,lty.coi=1,col.coi="grey",lwd.coi=2,lwd.sig=2,
+     arrow.lwd=0.03,arrow.len=0.12,plot.cb=TRUE,
+     ylab="Scale",main="Wavelet coherence: SP500 vs London HPI")
+
+plot(wtc.23, plot.phase=TRUE,lty.coi=1,col.coi="grey",lwd.coi=2,lwd.sig=2,
+     arrow.lwd=0.03,arrow.len=0.12,plot.cb=TRUE,
+     ylab="Scale",main="Wavelet coherence: Brent vs London HPI")
+
+plot(wtc.14, plot.phase=TRUE,lty.coi=1,col.coi="grey",lwd.coi=2,lwd.sig=2,
+     arrow.lwd=0.03,arrow.len=0.12,plot.cb=TRUE,
+     ylab="Scale",main="Wavelet coherence: SP500 vs Aberdeen HPI")
+
+plot(wtc.24, plot.phase=TRUE,lty.coi=1,col.coi="grey",lwd.coi=2,lwd.sig=2,
+     arrow.lwd=0.03,arrow.len=0.12,plot.cb=TRUE,
+     ylab="Scale",main="Wavelet coherence: Brent vs Aberdeen HPI")
+
+# interpretation
+# time-frequency space of time series covariance are located by the wavelet coherence. warm color represents regions with significant interrelation, cold color signify low dependence between the series. arrow in the coherence plot represents the lead/lag phase relations between the series. arrow points to right when the series are in phase, left anti phase. arrow point to right-down or left-up indicate that the first variable is leading, and vice versa.
+```
