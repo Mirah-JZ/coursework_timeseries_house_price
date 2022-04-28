@@ -155,11 +155,11 @@ ggplot(westminster.series.l, aes(x=ID,y=price,group=type,color=type))+
 
 HPI_series2.w <- HPI_series2 %>% pivot_wider(names_from=Date,values_from = Index)
 # average monthly growth during the first boom prior to 2008 crisis
-HPI_series2.w$grow1 <- (HPI_series2.w$`01/01/2008`-HPI_series2.w$`01/01/2006`)/24
+HPI_series2.w$grow1 <- (HPI_series2.w$`01/01/2008`/HPI_series2.w$`01/01/2006`)/24
 # average monthly growth during the recovery of crisis
-HPI_series2.w$grow2 <- (HPI_series2.w$`01/09/2010`-HPI_series2.w$`01/01/2009`)/21
+HPI_series2.w$grow2 <- (HPI_series2.w$`01/09/2010`/HPI_series2.w$`01/01/2009`)/21
 # average monthly growth during the latest pandemic boom
-HPI_series2.w$grow3 <- (HPI_series2.w$`01/01/2022`-HPI_series2.w$`01/04/2020`)/21
+HPI_series2.w$grow3 <- (HPI_series2.w$`01/01/2022`/HPI_series2.w$`01/04/2020`)/21
 
 HPI_series2.w <- HPI_series2.w[,c(1,648:650)]
 
